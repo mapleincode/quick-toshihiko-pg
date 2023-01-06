@@ -44,7 +44,6 @@ const quickConfig = function (items = [], options = {}) {
     // 设置 primary key
     if (!primaryKeySet) {
       config.primaryKey = true;
-      config.allowNull = true;
       primaryKeySet = true;
     }
 

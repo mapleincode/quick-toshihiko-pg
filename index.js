@@ -2,7 +2,7 @@
  * @Author: maple
  * @Date: 2020-11-18 11:43:40
  * @LastEditors: maple
- * @LastEditTime: 2023-01-05 17:09:44
+ * @LastEditTime: 2023-01-06 12:04:02
  */
 
 const fs = require('fs');
@@ -64,6 +64,7 @@ function initModel (db, dbName, modelRoot, initOptions) {
 
   // fetch table configs
   for (const file of dirs) {
+    // 第一层级
     if (file[0] === '.') continue;
     if (file.indexOf('.js') > -1) {
       const config = require(path.join(dbDirPath, file));
@@ -71,6 +72,7 @@ function initModel (db, dbName, modelRoot, initOptions) {
       continue;
     }
 
+    // 第二层级
     const subRoot = path.join(dbDirPath, file);
     const subDirs = fs.readdirSync(subRoot);
     for (const file of subDirs) {
@@ -91,11 +93,49 @@ function initModel (db, dbName, modelRoot, initOptions) {
 
     let [tableName, fields, options = {}] = config.config;
 
-    const field = fields[0];
-    if (typeof field !== 'object' || Array.isArray(field)) {
+    if (Array.isArray(fields)) {
+      // 数组格式转成 Sequelize 的 object 格式
       fields = quickConfig(fields, options);
     }
-    const model = db.define(tableName, fields);
+
+    // sequelize 配置
+    const sequelizeConfig = options.sequelizeConfig || {};
+    const sequelizeSync = options.sequelizeSync === undefined ? true : options.sequelizeSync;
+    const sequelizeSyncForce = options.sequelizeSyncForce || false;
+    const sequelizeFieldsOptions = options.sequelizeFieldsOptions || {};
+
+    // 添加字段额外信息
+    // 支持简配不支持的信息
+    for (const key of Object.keys(sequelizeFieldsOptions)) {
+      if (!fields[key]) {
+        continue;
+      }
+
+      const fieldOptions = sequelizeFieldsOptions[key];
+      for (const optionsKey of Object.keys(fieldOptions)) {
+        fields[key][optionsKey] = fieldOptions[optionsKey];
+      }
+    }
+
+    class QModel extends Model {
+
+    }
+
+    QModel.init(fields, {
+      tableName,
+      sequelize: db,
+      timestamps: true,
+      createdAt: true,
+      updatedAt: true,
+      freezeTableName: true,
+      ...sequelizeConfig
+    });
+
+    // 同步数据库
+    if (sequelizeSync) {
+      QModel.sync({ force: sequelizeSyncForce });
+    }
+
     if (MODLE_MAP[tableName]) {
       throw new Error(`table: ${tableName} already registed!`);
     }
@@ -104,7 +144,7 @@ function initModel (db, dbName, modelRoot, initOptions) {
     if (initOptions.saveTableWithNoDB) {
       if (!MODLE_MAP[tableName]) {
         // set model map
-        MODLE_MAP[tableName] = model;
+        MODLE_MAP[tableName] = QModel;
       } else {
         // throw error;
         throw new Error(`model ${tableName} has been already registed!`);
@@ -112,20 +152,20 @@ function initModel (db, dbName, modelRoot, initOptions) {
     }
 
     if (!MODLE_MAP[tableName]) {
-      MODLE_MAP[tableName] = model;
+      MODLE_MAP[tableName] = QModel;
     }
 
-    MODLE_MAP[`${dbName}.${tableName}`] = model;
+    MODLE_MAP[`${dbName}.${tableName}`] = QModel;
 
     // bind function
     const keys = Object.keys(config).filter(key => key !== 'config');
     for (const key of keys) {
       if (typeof config[key] === 'function') {
-        model[key] = config[key].bind(model);
+        QModel[key] = config[key].bind(QModel);
         continue;
       }
 
-      model[key] = config[key];
+      QModel[key] = config[key];
     }
   }
 }
@@ -133,6 +173,7 @@ function initModel (db, dbName, modelRoot, initOptions) {
 module.exports = {
   db: {
     init: function (dbConfigs = [], modelRoot = '', initOptions = {}) {
+      // model 地址
       modelRoot = modelRoot || path.join(process.execPath, 'models');
 
       if (!Array.isArray(dbConfigs)) {
@@ -142,12 +183,6 @@ module.exports = {
       for (const dbConfig of dbConfigs) {
         const { name } = dbConfig;
         delete dbConfig.name;
-        // delete dbConfig.dbType;
-        // dbConfig.database = dbConfig.database || name;
-        // init toshihiko
-        // const db =
-        // DB_MAP[name] = db;
-
         DB_CONFIG_MAP[name] = [dbConfig];
       }
 
